@@ -5,6 +5,8 @@ import cors from "cors";
 import { Server as SocketIOServer } from "socket.io";
 import { connectDB } from "./config/db.js";
 import { userRouter } from "./routes/userRoutes.js";
+import { mediaRouter } from "./routes/mediaRoutes.js";
+import { chatRouter } from "./routes/chatRoutes.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import { initSocket } from "./sockets/index.js";
@@ -17,13 +19,16 @@ const bootstrap = async () => {
     await connectDB();
 
     const app = express();
-    app.use(express.json());
+    app.use(express.json({ limit: "10mb" }));
     app.use(
       cors({
         origin: process.env.CLIENT_ORIGIN || "*",
         credentials: true,
       })
     );
+
+    // serve uploads as static
+    app.use("/public", express.static(path.join(__dirname, "public")));
 
     // Health check
     app.get("/api/health", (_req, res) => {
@@ -38,8 +43,10 @@ const bootstrap = async () => {
       }
     });
 
-    // User routes
+    // Routes
     app.use("/api/users", userRouter);
+    app.use("/api/media", mediaRouter);
+    app.use("/api/chats", chatRouter);
 
     // HTTP + Socket.IO
     const server = http.createServer(app);

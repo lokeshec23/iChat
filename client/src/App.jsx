@@ -1,16 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
-import axios from "axios";
+import { api } from "./api.js";
 import { getSocket } from "./utils/socket.js";
-
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
-});
+import ChatList from "./components/ChatList.jsx";
+import ChatWindow from "./components/ChatWindow.jsx";
 
 const App = () => {
   const [name, setName] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [user, setUser] = useState(null);
   const [socketStatus, setSocketStatus] = useState("disconnected");
+  const [activeChat, setActiveChat] = useState(null);
 
   // Load cached user
   useEffect(() => {
@@ -24,13 +23,29 @@ const App = () => {
     }
   }, []);
 
-  // Connect socket when phoneNumber is available
+  // Socket instance
   const socket = useMemo(() => {
     try {
       if (!phoneNumber) return null;
       const s = getSocket(phoneNumber);
-      s?.on("connect", () => setSocketStatus("connected"));
-      s?.on("disconnect", () => setSocketStatus("disconnected"));
+      s.on("connect", () => setSocketStatus("connected"));
+      s.on("disconnect", () => setSocketStatus("disconnected"));
+
+      // Flush queue on connect
+      s.on("connect", () => {
+        try {
+          const q = JSON.parse(
+            localStorage.getItem("ichat_outgoing_queue") || "[]"
+          );
+          if (Array.isArray(q) && q.length) {
+            q.forEach((msg) => s.emit("send_message", msg));
+            localStorage.removeItem("ichat_outgoing_queue");
+          }
+        } catch (err) {
+          console.error("flush queue error:", err?.message || err);
+        }
+      });
+
       return s;
     } catch (err) {
       console.error("socket memo error:", err?.message || err);
@@ -40,7 +55,7 @@ const App = () => {
 
   const handleSaveProfile = async (e) => {
     try {
-      e.preventDefault();
+      e?.preventDefault();
       if (!name?.trim() || !phoneNumber?.trim()) return;
 
       const res = await api.post("/api/users/upsert", {
@@ -60,6 +75,21 @@ const App = () => {
     }
   };
 
+  const startChatWith = async (otherPhone) => {
+    try {
+      if (!phoneNumber || !otherPhone) return;
+      const payload = { a: phoneNumber, b: otherPhone };
+      const res = await api.post("/api/chats/one-to-one", payload);
+      if (res?.data?.ok) {
+        setActiveChat(res.data.chat);
+      } else {
+        alert("Unable to open chat");
+      }
+    } catch (err) {
+      console.error("startChatWith error:", err?.message || err);
+    }
+  };
+
   return (
     <div className="container py-4">
       <header className="d-flex align-items-center justify-content-between mb-4">
@@ -75,7 +105,7 @@ const App = () => {
 
       <div className="row g-4">
         <div className="col-12 col-lg-4">
-          <div className="card shadow-sm">
+          <div className="card shadow-sm mb-3">
             <div className="card-body">
               <h2 className="h5 mb-3">Your Profile</h2>
               <form onSubmit={handleSaveProfile}>
@@ -93,7 +123,7 @@ const App = () => {
                   <label className="form-label">Phone Number</label>
                   <input
                     className="form-control"
-                    placeholder="e.g. +91 98765 43210"
+                    placeholder="e.g. 9361062252"
                     value={phoneNumber}
                     onChange={(e) => setPhoneNumber(e.target.value)}
                   />
@@ -106,32 +136,44 @@ const App = () => {
             </div>
           </div>
 
-          <div className="small text-muted mt-2">
-            Tip: iChat uses your phone number for identification. We’ll add
-            OTP/verification in a later step.
+          <div className="card shadow-sm">
+            <div className="card-body">
+              <ChatList
+                phoneNumber={phoneNumber}
+                onSelectChat={(c) => setActiveChat(c)}
+              />
+              <hr />
+              <div>
+                <h6 className="small">Start chat (quick)</h6>
+                <StartChatForm onStart={startChatWith} />
+              </div>
+            </div>
           </div>
         </div>
 
         <div className="col-12 col-lg-8">
-          <div className="card shadow-sm">
-            <div className="card-body">
-              <h2 className="h5 mb-3">Chats (coming next)</h2>
-              <p className="mb-0">
-                You’re connected: <strong>{socketStatus}</strong>
-                {user ? (
-                  <>
-                    {" "}
-                    as <strong>{user.name}</strong> ({user.phoneNumber})
-                  </>
-                ) : (
-                  " — save your profile to continue."
-                )}
-              </p>
-              <hr />
-              <div className="alert alert-info mb-0">
-                In the next step we’ll add: conversations, real-time messages,
-                image & sticker upload, and offline/PWA.
-              </div>
+          <div className="card shadow-sm h-100">
+            <div className="card-body d-flex flex-column">
+              {activeChat ? (
+                <>
+                  <div className="mb-2 d-flex align-items-center justify-content-between">
+                    <h5 className="h6 m-0">
+                      {activeChat.title ||
+                        activeChat.participants.find((p) => p !== phoneNumber)}
+                    </h5>
+                    <small className="text-muted">Chat</small>
+                  </div>
+                  <ChatWindow
+                    chat={activeChat}
+                    phoneNumber={phoneNumber}
+                    socket={socket}
+                  />
+                </>
+              ) : (
+                <div className="text-center text-muted my-5">
+                  <p>Select a chat or start a new one to begin messaging.</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -139,10 +181,35 @@ const App = () => {
 
       <footer className="text-center text-muted mt-4">
         <small>
-          Responsive by Bootstrap — resize the window to see it adapt.
+          Responsive by Bootstrap — messages are real-time using Socket.IO.
+          Offline messages are queued locally and flushed when reconnected.
         </small>
       </footer>
     </div>
+  );
+};
+
+const StartChatForm = ({ onStart }) => {
+  const [other, setOther] = useState("");
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (other?.trim()) onStart(other.trim());
+        setOther("");
+      }}
+      className="d-flex gap-2 mt-2"
+    >
+      <input
+        className="form-control form-control-sm"
+        placeholder="Other phone"
+        value={other}
+        onChange={(e) => setOther(e.target.value)}
+      />
+      <button className="btn btn-sm btn-outline-primary" type="submit">
+        Open
+      </button>
+    </form>
   );
 };
 
