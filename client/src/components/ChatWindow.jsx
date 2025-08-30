@@ -24,42 +24,59 @@ const ChatWindow = ({ chat, phoneNumber, socket }) => {
     }
   };
 
+  // useEffect(() => {
+  //   try {
+  //     fetchMessages();
+  //     // join chat room
+  //     socket?.emit("join_chat", { chatId: chat._id });
+  //     // listeners
+  //     const onMessage = (m) => {
+  //       if (m.chatId === chat._id) setMessages((prev) => [...prev, m]);
+  //     };
+  //     const onStatus = ({ messageId, status }) => {
+  //       setMessages((prev) =>
+  //         prev.map((x) => (x._id === messageId ? { ...x, status } : x))
+  //       );
+  //     };
+  //     const onTyping = ({ chatId, sender, isTyping }) => {
+  //       if (chatId === chat._id && sender !== phoneNumber)
+  //         setIsTyping(!!isTyping);
+  //     };
+
+  //     socket?.on("message", onMessage);
+  //     socket?.on("message_status", onStatus);
+  //     socket?.on("typing", onTyping);
+
+  //     return () => {
+  //       try {
+  //         socket?.off("message", onMessage);
+  //         socket?.off("message_status", onStatus);
+  //         socket?.off("typing", onTyping);
+  //       } catch (err) {
+  //         console.error("cleanup listeners error:", err?.message || err);
+  //       }
+  //     };
+  //   } catch (err) {
+  //     console.error("ChatWindow effect error:", err?.message || err);
+  //   }
+  // }, [chat?._id, socket]);
+
   useEffect(() => {
-    try {
-      fetchMessages();
-      // join chat room
-      socket?.emit("join_chat", { chatId: chat._id });
-      // listeners
-      const onMessage = (m) => {
-        if (m.chatId === chat._id) setMessages((prev) => [...prev, m]);
-      };
-      const onStatus = ({ messageId, status }) => {
-        setMessages((prev) =>
-          prev.map((x) => (x._id === messageId ? { ...x, status } : x))
-        );
-      };
-      const onTyping = ({ chatId, sender, isTyping }) => {
-        if (chatId === chat._id && sender !== phoneNumber)
-          setIsTyping(!!isTyping);
-      };
+    if (!socket || !chat) return;
 
-      socket?.on("message", onMessage);
-      socket?.on("message_status", onStatus);
-      socket?.on("typing", onTyping);
+    const handleNewMessage = (msg) => {
+      setMessages((prev) => {
+        if (prev.some((m) => m._id === msg._id)) return prev; // already added
+        return [...prev, msg];
+      });
+    };
 
-      return () => {
-        try {
-          socket?.off("message", onMessage);
-          socket?.off("message_status", onStatus);
-          socket?.off("typing", onTyping);
-        } catch (err) {
-          console.error("cleanup listeners error:", err?.message || err);
-        }
-      };
-    } catch (err) {
-      console.error("ChatWindow effect error:", err?.message || err);
-    }
-  }, [chat?._id, socket]);
+    socket.on("message:new", handleNewMessage);
+
+    return () => {
+      socket.off("message:new", handleNewMessage);
+    };
+  }, [socket, chat]);
 
   useEffect(() => {
     try {
